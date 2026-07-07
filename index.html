@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+  ============================================================================
+  RACE TO 1K  ·  běží CELÉ na GitHubu (žádný server, žádný Railway)
+  ============================================================================
+
+  SOUBORY (jen dva):
+    - index.html                     -> tenhle soubor: web + hráči + data v jednom
+    - .github/workflows/collect.yml  -> GitHub Action, každých ~15 min stáhne LP z Riot API
+
+  NASTAVENÍ NA NOVÉM ÚČTU (krok za krokem):
+    1) Založ nový repozitář (klidně veřejný), např. "race-to-1k",
+       a nahraj do něj tenhle index.html + složku .github/workflows/collect.yml.
+    2) Repo -> Settings -> Secrets and variables -> Actions -> New repository secret
+         Name:   RIOT_API_KEY
+         Secret: tvůj RGAPI-... klíč
+       (Klíč patří VÝHRADNĚ sem do Secrets. Nikdy ho nedávej do tohohle souboru
+        ani nikam, co se commituje — repo i Pages jsou veřejné pro celý internet.
+        Action ho čte automaticky a v logu je maskovaný.)
+    3) Repo -> Settings -> Actions -> General -> Workflow permissions
+         -> zaškrtni "Read and write permissions"  (jinak Action nemůže zapsat data)
+    4) Repo -> Settings -> Pages -> Source: "Deploy from a branch" -> main / (root)
+    5) Uprav si níže blok <script id="race-config"> = svoji sestavu hráčů (návod je u něj).
+    6) Repo -> Actions -> "Collect LoR ladder" -> Run workflow = první data hned teď.
+
+  Blok <script id="race-data"> si Action přepisuje SAMA — needituj ho ručně.
+  ============================================================================
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Race to 1K</title>
+
+<!-- ==========================================================================
+     KONFIGURACE — TOHLE EDITUJEŠ TY
+     - region: jeden z  AM | EMEA | APAC | SEA
+     - name:   MUSÍ přesně sedět se jménem hráče na Master žebříčku LoR
+               (porovnává se bez ohledu na velikost písmen; nenalezení hráči
+                se v Action logu vypíšou a na webu se zobrazí jako "not on ladder")
+     - effect (nepovinné): storyteller | glitch | gold | stream
+     - twitch (jen s effect "stream"): název kanálu, udělá z jména odkaz + LIVE odznak
+     ========================================================================== -->
+<script id="race-config" type="application/json">
+{
+  "title": "RACE TO 1K",
+  "subtitle": "First to 1000 LP on the Master ladder",
+  "target": 1000,
+  "raceStart": "2026-07-07T00:00:00Z",
+  "historyCap": 600,
+  "players": [
+    { "key": "storyteller", "name": "Storyteller",      "region": "AM",   "effect": "storyteller" },
+    { "key": "quovadis",    "name": "QuoVadisDomine",    "region": "EMEA", "effect": "glitch" },
+    { "key": "wad",         "name": "I LOVE FREEZES",    "region": "AM",   "effect": "stream", "twitch": "wad100" }
+  ]
+}
+</script>
+
+<!-- ==========================================================================
+     DATA — NEEDITUJ RUČNĚ. Tenhle blok přepisuje GitHub Action.
+     ========================================================================== -->
+<!-- RACE-DATA:START -->
+<script id="race-data" type="application/json">
+{ "updated": null, "players": {} }
+</script>
+<!-- RACE-DATA:END -->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:#0a0612;
+    --bg-2:#0f0a1c;
+    --surface:#160e28;
+    --surface-2:#1d1435;
+    --line:#2c2148;
+    --teal:#21e6c1;
+    --purple:#b14aff;
+    --gold:#ffcf4a;
+    --rose:#ff3b6b;
+    --text:#ece6ff;
+    --muted:#8a7fb0;
+    --track:#120c22;
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+
+  html,body{background:var(--bg);color:var(--text)}
+
+  body{
+    font-family:'Rajdhani',system-ui,sans-serif;
+    min-height:100vh;
+    position:relative;
+    overflow-x:hidden;
+    padding:clamp(1rem,4vw,3rem) clamp(0.75rem,4vw,2rem) 4rem;
+  }
+
+  /* ambient arcane atmosphere */
+  .aurora{
+    position:fixed;inset:0;z-index:0;pointer-events:none;
+    background:
+      radial-gradient(50rem 40rem at 12% -10%, rgba(177,74,255,.18), transparent 60%),
+      radial-gradient(45rem 40rem at 105% 8%, rgba(33,230,193,.14), transparent 55%),
+      radial-gradient(40rem 40rem at 50% 120%, rgba(255,207,74,.07), transparent 60%);
+    animation:drift 22s ease-in-out infinite alternate;
+  }
+  @keyframes drift{from{transform:translate3d(-1.5%,-1%,0) scale(1)}to{transform:translate3d(1.5%,1.5%,0) scale(1.06)}}
+
+  .grid-lines{
+    position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.35;
+    background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:48px 48px;
+    -webkit-mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 25%,transparent 75%);
+            mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 25%,transparent 75%);
+  }
+
+  .wrap{position:relative;z-index:1;max-width:1000px;margin:0 auto}
+
+  /* ---------- header ---------- */
+  header{margin-bottom:clamp(1.5rem,4vw,2.75rem)}
+
+  .eyebrow{
+    font-family:'Share Tech Mono',monospace;
+    letter-spacing:.42em;text-transform:uppercase;
+    font-size:.72rem;color:var(--teal);
+    display:flex;align-items:center;gap:.7rem;margin-bottom:.6rem;
+  }
+  .eyebrow::before{content:"";width:26px;height:1px;background:linear-gradient(90deg,var(--teal),transparent)}
+
+  h1{
+    font-family:'Orbitron',sans-serif;font-weight:900;
+    font-size:clamp(2.3rem,8vw,4.6rem);line-height:.95;letter-spacing:.01em;
+    background:linear-gradient(100deg,#fff 0%,var(--teal) 42%,var(--purple) 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    text-shadow:0 0 60px rgba(177,74,255,.25);
+  }
+
+  .subtitle{
+    margin-top:.7rem;color:var(--muted);
+    font-size:clamp(.95rem,2.4vw,1.15rem);font-weight:600;letter-spacing:.02em;
+    display:flex;flex-wrap:wrap;align-items:center;gap:.6rem .95rem;
+  }
+  .updated{
+    font-family:'Share Tech Mono',monospace;font-size:.78rem;color:var(--muted);
+    display:inline-flex;align-items:center;gap:.5rem;
+    padding:.25rem .6rem;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.02);
+  }
+  .live-dot{width:7px;height:7px;border-radius:50%;background:var(--teal);box-shadow:0 0 8px var(--teal);animation:blink 2s ease-in-out infinite}
+  @keyframes blink{50%{opacity:.35}}
+
+  /* ---------- track scale ---------- */
+  .scale{
+    display:flex;justify-content:space-between;
+    font-family:'Share Tech Mono',monospace;font-size:.72rem;color:var(--muted);
+    padding:0 0 .5rem;margin-left:clamp(0px,14vw,190px);
+  }
+  .scale .goal{color:var(--gold)}
+
+  /* ---------- rows ---------- */
+  .board{display:flex;flex-direction:column;gap:.7rem}
+
+  .row{
+    display:grid;
+    grid-template-columns:clamp(150px,26vw,190px) 1fr;
+    align-items:center;gap:clamp(.6rem,2vw,1.4rem);
+    background:linear-gradient(180deg,var(--surface),var(--bg-2));
+    border:1px solid var(--line);border-radius:14px;
+    padding:clamp(.7rem,2vw,1.05rem) clamp(.8rem,2.5vw,1.3rem);
+    position:relative;overflow:hidden;
+    transition:border-color .25s,transform .25s;
+  }
+  .row:hover{transform:translateY(-2px)}
+  .row.leader{border-color:rgba(33,230,193,.55);box-shadow:0 0 0 1px rgba(33,230,193,.25),0 12px 40px -18px rgba(33,230,193,.6)}
+  .row.done{border-color:rgba(255,207,74,.6);box-shadow:0 0 0 1px rgba(255,207,74,.3),0 12px 44px -16px rgba(255,207,74,.55)}
+  .row.absent{opacity:.6}
+
+  /* identity block */
+  .who{display:flex;align-items:center;gap:.7rem;min-width:0}
+  .rank{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.05rem;
+    width:2.2rem;height:2.2rem;flex:0 0 auto;display:grid;place-items:center;border-radius:9px;
+    background:var(--track);border:1px solid var(--line);color:var(--muted);
+  }
+  .rank.p1{color:#0a0612;background:linear-gradient(150deg,#fff5cc,var(--gold));border-color:transparent;box-shadow:0 0 18px rgba(255,207,74,.55)}
+  .rank.p2{color:#0a0612;background:linear-gradient(150deg,#eef2ff,#c6cede);border-color:transparent}
+  .rank.p3{color:#0a0612;background:linear-gradient(150deg,#ffd9b0,#d9873f);border-color:transparent}
+
+  .namewrap{min-width:0}
+  .name{
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:clamp(.92rem,2.1vw,1.08rem);
+    letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    display:inline-flex;align-items:center;gap:.45rem;
+  }
+  .region-tag{
+    font-family:'Share Tech Mono',monospace;font-size:.66rem;letter-spacing:.12em;
+    color:var(--muted);text-transform:uppercase;
+  }
+
+  /* effect: storyteller */
+  .fx-storyteller .name{color:var(--teal);text-shadow:0 0 14px rgba(33,230,193,.55)}
+  .fx-storyteller .name .mark{color:var(--teal)}
+  .mark{font-size:.85em}
+
+  /* effect: gold */
+  .fx-gold .name{
+    background:linear-gradient(100deg,#fff4cf,var(--gold),#b8862a,var(--gold));
+    background-size:220% auto;-webkit-background-clip:text;background-clip:text;color:transparent;
+    animation:shimmer 4s linear infinite;
+  }
+  @keyframes shimmer{to{background-position:220% center}}
+
+  /* effect: glitch */
+  .fx-glitch .name{position:relative;color:var(--text)}
+  .fx-glitch .name .glitch{position:relative;display:inline-block}
+  .fx-glitch .name .glitch::before,
+  .fx-glitch .name .glitch::after{
+    content:attr(data-text);position:absolute;left:0;top:0;width:100%;overflow:hidden;
+    clip-path:inset(0 0 0 0);
+  }
+  .fx-glitch .name .glitch::before{color:var(--rose);animation:glitchA 2.6s infinite steps(2,end)}
+  .fx-glitch .name .glitch::after{color:var(--teal);animation:glitchB 3.1s infinite steps(2,end)}
+  @keyframes glitchA{0%,92%,100%{transform:translate(0);clip-path:inset(0 0 100% 0)}93%{transform:translate(-2px,-1px);clip-path:inset(10% 0 55% 0)}96%{transform:translate(2px,1px);clip-path:inset(60% 0 8% 0)}}
+  @keyframes glitchB{0%,90%,100%{transform:translate(0);clip-path:inset(100% 0 0 0)}91%{transform:translate(2px,1px);clip-path:inset(20% 0 40% 0)}97%{transform:translate(-2px,0);clip-path:inset(50% 0 20% 0)}}
+
+  /* stream badge */
+  .live{
+    font-family:'Share Tech Mono',monospace;font-size:.6rem;letter-spacing:.14em;
+    color:#fff;background:var(--rose);padding:.12rem .4rem;border-radius:4px;
+    text-decoration:none;display:inline-flex;align-items:center;gap:.3rem;
+    box-shadow:0 0 12px rgba(255,59,107,.5);
+  }
+  .live b{width:5px;height:5px;border-radius:50%;background:#fff;animation:blink 1.3s infinite}
+
+  /* progress track */
+  .prog{display:flex;flex-direction:column;gap:.42rem;min-width:0}
+  .bar{
+    position:relative;height:16px;border-radius:999px;background:var(--track);
+    border:1px solid var(--line);overflow:hidden;
+  }
+  .fill{
+    position:absolute;inset:0 auto 0 0;height:100%;border-radius:999px;width:0;
+    background:linear-gradient(90deg,var(--teal),var(--purple));
+    box-shadow:0 0 16px rgba(177,74,255,.5);
+    transition:width 1s cubic-bezier(.2,.8,.2,1);
+  }
+  .leader .fill{background:linear-gradient(90deg,#5cffe4,var(--teal),var(--purple))}
+  .done .fill{background:linear-gradient(90deg,var(--gold),#ffe9a8,var(--gold));box-shadow:0 0 20px rgba(255,207,74,.6)}
+  .fill::after{
+    content:"";position:absolute;right:0;top:0;bottom:0;width:34px;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.75));opacity:.65;
+  }
+
+  .meta{
+    display:flex;justify-content:space-between;align-items:baseline;gap:.75rem;
+    font-family:'Share Tech Mono',monospace;font-size:.74rem;color:var(--muted);
+  }
+  .lp{font-family:'Orbitron',sans-serif;font-weight:900;font-size:clamp(1rem,2.6vw,1.35rem);color:var(--text);letter-spacing:.02em}
+  .lp small{font-size:.55em;color:var(--muted);font-weight:500;margin-left:.15rem}
+  .delta.up{color:var(--teal)}
+  .delta.down{color:var(--rose)}
+  .delta.flat{color:var(--muted)}
+  .remaining{color:var(--muted)}
+  .remaining.goalhit{color:var(--gold);font-weight:700}
+  .peak{color:var(--muted)}
+
+  .absent .lp{color:var(--muted)}
+  .note{color:var(--muted);font-style:italic}
+
+  /* empty state */
+  .empty{
+    text-align:center;padding:4rem 1rem;border:1px dashed var(--line);border-radius:16px;
+    color:var(--muted);background:rgba(255,255,255,.015);
+  }
+  .empty .big{font-family:'Orbitron',sans-serif;font-weight:700;color:var(--text);font-size:1.15rem;margin-bottom:.5rem}
+
+  footer{
+    margin-top:2.5rem;display:flex;flex-wrap:wrap;gap:.6rem 1.4rem;align-items:center;
+    font-family:'Share Tech Mono',monospace;font-size:.72rem;color:var(--muted);
+  }
+  .legend{display:inline-flex;align-items:center;gap:.45rem}
+  .swatch{width:10px;height:10px;border-radius:3px}
+  .sw-teal{background:var(--teal)} .sw-gold{background:var(--gold)} .sw-rose{background:var(--rose)}
+
+  @media (max-width:560px){
+    .row{grid-template-columns:1fr}
+    .who{margin-bottom:.15rem}
+    .scale{margin-left:0}
+  }
+
+  @media (prefers-reduced-motion:reduce){
+    .aurora,.live-dot,.live b,.fx-gold .name{animation:none}
+    .fx-glitch .name .glitch::before,.fx-glitch .name .glitch::after{display:none}
+    .fill{transition:none}
+  }
+</style>
+</head>
+<body>
+<div class="aurora"></div>
+<div class="grid-lines"></div>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow" id="eyebrow">Legends of Runeterra · Master</div>
+    <h1 id="title">RACE TO 1K</h1>
+    <div class="subtitle">
+      <span id="subtitle">First to 1000 LP on the Master ladder</span>
+      <span class="updated" id="updated"><span class="live-dot"></span><span id="updated-text">waiting for sync</span></span>
+    </div>
+  </header>
+
+  <div class="scale"><span>0</span><span class="goal" id="goal-label">1000 LP</span></div>
+  <div class="board" id="board"></div>
+
+  <footer>
+    <span>Auto-updated every ~15 min via Riot API</span>
+    <span class="legend"><span class="swatch sw-teal"></span>gaining</span>
+    <span class="legend"><span class="swatch sw-rose"></span>losing</span>
+    <span class="legend"><span class="swatch sw-gold"></span>reached 1K</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  function readJSON(id, fallback){
+    try{
+      var el = document.getElementById(id);
+      if(!el) return fallback;
+      var txt = el.textContent.trim();
+      return txt ? JSON.parse(txt) : fallback;
+    }catch(e){
+      console.error("Failed to parse #"+id, e);
+      return fallback;
+    }
+  }
+
+  function esc(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];
+    });
+  }
+
+  function timeAgo(iso){
+    if(!iso) return "waiting for sync";
+    var then = new Date(iso).getTime();
+    if(isNaN(then)) return "waiting for sync";
+    var s = Math.max(0, Math.floor((Date.now()-then)/1000));
+    if(s < 60) return "updated just now";
+    var m = Math.floor(s/60);
+    if(m < 60) return "updated "+m+"m ago";
+    var h = Math.floor(m/60);
+    if(h < 24) return "updated "+h+"h ago";
+    var d = Math.floor(h/24);
+    return "updated "+d+"d ago";
+  }
+
+  var cfg  = readJSON("race-config", {});
+  var data = readJSON("race-data", {updated:null, players:{}});
+  var target = Number(cfg.target) || 1000;
+  var roster = Array.isArray(cfg.players) ? cfg.players : [];
+  var snaps  = (data && data.players) ? data.players : {};
+
+  // set static text
+  document.getElementById("title").textContent = cfg.title || "RACE TO 1K";
+  document.getElementById("subtitle").textContent = cfg.subtitle || "";
+  document.getElementById("goal-label").textContent = target + " LP";
+  document.getElementById("updated-text").textContent = timeAgo(data.updated);
+
+  // build view models
+  var rows = roster.map(function(p){
+    var s = snaps[p.key] || {};
+    var found = !!s.found;
+    var lp = found && typeof s.lp === "number" ? s.lp : 0;
+    var start = 0;
+    if(Array.isArray(s.history) && s.history.length){
+      var first = s.history[0];
+      if(first && typeof first.lp === "number") start = first.lp;
+    }
+    return {
+      cfg:p,
+      found:found,
+      lp:lp,
+      rankLadder: (found && typeof s.rank === "number") ? s.rank : null,
+      peak: (typeof s.peak === "number") ? s.peak : lp,
+      delta: found ? (lp - start) : 0,
+      done: lp >= target
+    };
+  });
+
+  // sort: found players by LP desc, absent players last (alphabetical)
+  rows.sort(function(a,b){
+    if(a.found !== b.found) return a.found ? -1 : 1;
+    if(b.lp !== a.lp) return b.lp - a.lp;
+    return String(a.cfg.name).localeCompare(String(b.cfg.name));
+  });
+
+  var board = document.getElementById("board");
+
+  if(!roster.length){
+    board.innerHTML = '<div class="empty"><div class="big">No players configured</div>Edit the <code>race-config</code> block in index.html to add your roster.</div>';
+    return;
+  }
+
+  var anyFound = rows.some(function(r){return r.found;});
+
+  var html = rows.map(function(r, i){
+    var pos = i + 1;
+    var p = r.cfg;
+    var fx = p.effect ? ("fx-"+p.effect) : "";
+    var cls = ["row", fx];
+    if(r.done) cls.push("done");
+    else if(r.found && anyFound && i === 0) cls.push("leader");
+    if(!r.found) cls.push("absent");
+
+    // rank medal
+    var rankCls = "rank";
+    if(r.found){
+      if(pos===1) rankCls += " p1"; else if(pos===2) rankCls += " p2"; else if(pos===3) rankCls += " p3";
+    }
+
+    // name with effect markup
+    var nameInner;
+    if(p.effect === "glitch"){
+      nameInner = '<span class="glitch" data-text="'+esc(p.name)+'">'+esc(p.name)+'</span>';
+    }else if(p.effect === "storyteller"){
+      nameInner = '<span class="mark">&#10022;</span>'+esc(p.name);
+    }else{
+      nameInner = esc(p.name);
+    }
+    var live = "";
+    if(p.effect === "stream" && p.twitch){
+      live = ' <a class="live" href="https://twitch.tv/'+esc(p.twitch)+'" target="_blank" rel="noopener"><b></b>LIVE</a>';
+    }
+
+    // progress
+    var pct = Math.max(0, Math.min(100, (r.lp/target)*100));
+    var remaining = target - r.lp;
+
+    var deltaHtml = "";
+    if(r.found){
+      if(r.delta > 0) deltaHtml = '<span class="delta up">&#9650; '+r.delta+'</span>';
+      else if(r.delta < 0) deltaHtml = '<span class="delta down">&#9660; '+Math.abs(r.delta)+'</span>';
+      else deltaHtml = '<span class="delta flat">&#8212;</span>';
+    }
+
+    var rightHtml;
+    if(!r.found){
+      rightHtml = '<span class="note">not on Master ladder</span>';
+    }else if(r.done){
+      rightHtml = '<span class="remaining goalhit">&#9733; REACHED 1K</span>';
+    }else{
+      rightHtml = '<span class="remaining">'+remaining+' to '+target+'</span>';
+    }
+
+    return ''+
+      '<div class="'+cls.join(" ").trim()+'">'+
+        '<div class="who">'+
+          '<div class="'+rankCls+'">'+(r.found?pos:'&#8226;')+'</div>'+
+          '<div class="namewrap">'+
+            '<div class="name">'+nameInner+live+'</div>'+
+            '<div class="region-tag">'+esc(p.region||"")+'</div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="prog">'+
+          '<div class="bar"><div class="fill" data-w="'+pct.toFixed(2)+'%" style="width:0"></div></div>'+
+          '<div class="meta">'+
+            '<span class="lp">'+(r.found?r.lp:'&#8212;')+'<small>LP</small> '+deltaHtml+'</span>'+
+            (r.found?'<span class="peak">peak '+r.peak+'</span>':'')+
+            rightHtml+
+          '</div>'+
+        '</div>'+
+      '</div>';
+  }).join("");
+
+  board.innerHTML = html;
+
+  // animate fills growing from 0 to their target width
+  setTimeout(function(){
+    var fills = board.querySelectorAll(".fill");
+    for(var i=0;i<fills.length;i++){ fills[i].style.width = fills[i].getAttribute("data-w"); }
+  }, 60);
+})();
+</script>
+</body>
+</html>
