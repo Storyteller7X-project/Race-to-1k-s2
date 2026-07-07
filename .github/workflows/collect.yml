@@ -1,7 +1,7 @@
 name: Collect LoR ladder
 
-# Stáhne CELÝ Master žebříček z AM + EMEA každých 15 min a uloží ho do data/live.json.
-# Do data/history.json navíc dopisuje snímek top hráčů (pro replay) cca po 2 hodinách.
+# Stáhne Master žebříček z AM + EMEA každých 15 min a uloží top 50 do data/live.json.
+# Do data/history.json přidává snímek top hráčů (pro replay) taky každých ~15 min.
 # Cron interval si klidně změň (např. "*/30 * * * *").
 on:
   schedule:
@@ -36,9 +36,10 @@ jobs:
 
           // -------- settings (uprav dle potřeby) --------
           const REGIONS = { AM: "americas", EMEA: "europe" }; // které servery sbírat
-          const FRAME_TOP_N = 30;          // kolik top hráčů ukládat do historie (pro replay)
-          const FRAME_INTERVAL_MIN = 120;  // jak často přidávat snímek do historie (minuty)
-          const MAX_FRAMES = 600;          // strop počtu snímků (nejstarší se odmazávají)
+          const LIVE_TOP_N = 50;           // kolik nejlepších hráčů zobrazovat v žebříčku
+          const FRAME_TOP_N = 50;          // kolik top hráčů ukládat do historie (pro replay)
+          const FRAME_INTERVAL_MIN = 15;   // jak často přidávat snímek do historie (minuty)
+          const MAX_FRAMES = 2000;         // strop počtu snímků (nejstarší se odmazávají)
 
           const LIVE_PATH = "data/live.json";
           const HIST_PATH = "data/history.json";
@@ -84,9 +85,11 @@ jobs:
           const now = new Date().toISOString();
           if (!existsSync("data")) mkdirSync("data", { recursive: true });
 
-          // live.json — full current ladder
-          writeFileSync(LIVE_PATH, JSON.stringify({ updated: now, regions: codes, count: merged.length, players: merged }));
-          console.log(`live.json: ${merged.length} players written`);
+          // live.json — top LIVE_TOP_N of the current ladder (+ true total)
+          const total = merged.length;
+          const liveList = merged.slice(0, LIVE_TOP_N);
+          writeFileSync(LIVE_PATH, JSON.stringify({ updated: now, regions: codes, total: total, count: liveList.length, players: liveList }));
+          console.log(`live.json: top ${liveList.length} of ${total} written`);
 
           // history.json — append a top-N snapshot on cadence
           const hist = readJson(HIST_PATH, { frameTopN: FRAME_TOP_N, frames: [] });
