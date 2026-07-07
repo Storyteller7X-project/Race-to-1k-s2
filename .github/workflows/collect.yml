@@ -1,13 +1,13 @@
 name: Collect LoR ladder
 
-# Běží každých 15 minut + jde spustit ručně (Actions -> Run workflow).
-# Cron interval si klidně změň (např. "*/30 * * * *" = každých 30 min).
+# Stáhne CELÝ Master žebříček z AM + EMEA každých 15 min a uloží ho do data/live.json.
+# Do data/history.json navíc dopisuje snímek top hráčů (pro replay) cca po 2 hodinách.
+# Cron interval si klidně změň (např. "*/30 * * * *").
 on:
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
-# Potřeba, aby Action mohla commitnout aktualizovaný index.html.
 permissions:
   contents: write
 
@@ -20,116 +20,99 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Fetch ladder and update index.html
+      - name: Fetch ladder
         env:
           RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
         run: |
           cat > "$RUNNER_TEMP/collect.mjs" <<'EOF'
-          import { readFileSync, writeFileSync } from "node:fs";
+          import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 
-          const FILE = "index.html";
           const KEY = process.env.RIOT_API_KEY;
           if (!KEY) { console.error("Missing RIOT_API_KEY secret."); process.exit(1); }
 
-          // LoR regional routing values
-          const ROUTING = { AM: "americas", EMEA: "europe", APAC: "asia", SEA: "sea" };
+          // -------- settings (uprav dle potřeby) --------
+          const REGIONS = { AM: "americas", EMEA: "europe" }; // které servery sbírat
+          const FRAME_TOP_N = 30;          // kolik top hráčů ukládat do historie (pro replay)
+          const FRAME_INTERVAL_MIN = 120;  // jak často přidávat snímek do historie (minuty)
+          const MAX_FRAMES = 600;          // strop počtu snímků (nejstarší se odmazávají)
 
-          const html = readFileSync(FILE, "utf8");
-          const grab = (re, s) => { const m = s.match(re); return m ? m[1] : null; };
+          const LIVE_PATH = "data/live.json";
+          const HIST_PATH = "data/history.json";
 
-          const cfgRaw = grab(/<script id="race-config" type="application\/json">([\s\S]*?)<\/script>/, html);
-          if (!cfgRaw) { console.error("race-config block not found."); process.exit(1); }
-          let cfg;
-          try { cfg = JSON.parse(cfgRaw); }
-          catch (e) { console.error("race-config is not valid JSON:", e.message); process.exit(1); }
+          function readJson(p, fallback){
+            try { if (existsSync(p)) { const t = readFileSync(p,"utf8").trim(); return t ? JSON.parse(t) : fallback; } }
+            catch (e) { console.warn("read "+p+" failed:", e.message); }
+            return fallback;
+          }
 
-          const DATA_RE = /<!-- RACE-DATA:START -->[\s\S]*?<!-- RACE-DATA:END -->/;
-          const dataBlock = html.match(DATA_RE);
-          if (!dataBlock) { console.error("RACE-DATA markers not found."); process.exit(1); }
-          const prevRaw = grab(/<script id="race-data" type="application\/json">([\s\S]*?)<\/script>/, dataBlock[0]);
-          let prev = { updated: null, players: {} };
-          try { if (prevRaw && prevRaw.trim()) prev = JSON.parse(prevRaw); }
-          catch (e) { console.warn("Existing data block unreadable, starting fresh."); }
-          if (!prev.players) prev.players = {};
-
-          const cap = Number(cfg.historyCap) || 600;
-          const roster = Array.isArray(cfg.players) ? cfg.players : [];
-          const regions = [...new Set(roster.map(p => p.region))];
-
-          async function fetchRegion(reg) {
-            const routing = ROUTING[reg];
-            if (!routing) { console.error("Unknown region code:", reg); return { ok: false }; }
-            const url = `https://${routing}.api.riotgames.com/lor/ranked/v1/leaderboards`;
+          async function fetchRegion(code){
+            const url = `https://${REGIONS[code]}.api.riotgames.com/lor/ranked/v1/leaderboards`;
             try {
               const res = await fetch(url, { headers: { "X-Riot-Token": KEY } });
-              if (!res.ok) { console.error(`[${reg}] HTTP ${res.status} ${res.statusText}`); return { ok: false }; }
+              if (!res.ok) { console.error(`[${code}] HTTP ${res.status} ${res.statusText}`); return null; }
               const json = await res.json();
               const players = Array.isArray(json.players) ? json.players : [];
-              const map = new Map();
-              for (const pl of players) {
-                if (pl && typeof pl.name === "string")
-                  map.set(pl.name.toLowerCase(), { lp: Number(pl.lp) || 0, rank: Number(pl.rank) });
-              }
-              console.log(`[${reg}] ${players.length} players on ladder`);
-              return { ok: true, map };
-            } catch (e) {
-              console.error(`[${reg}] fetch error:`, e.message);
-              return { ok: false };
+              console.log(`[${code}] ${players.length} Masters`);
+              return players.map(p => ({ name: String(p.name || ""), region: code, lp: Number(p.lp) || 0 }))
+                            .filter(p => p.name);
+            } catch (e) { console.error(`[${code}] fetch error:`, e.message); return null; }
+          }
+
+          const codes = Object.keys(REGIONS);
+          const results = {};
+          for (const c of codes) results[c] = await fetchRegion(c);
+
+          // If a region failed, keep its previous entries instead of wiping everyone.
+          const prevLive = readJson(LIVE_PATH, { updated:null, regions:codes, players:[] });
+          let merged = [], anyOk = false;
+          for (const c of codes) {
+            if (results[c]) { anyOk = true; merged = merged.concat(results[c]); }
+            else {
+              const prev = (prevLive.players || []).filter(p => p.region === c);
+              console.log(`[${c}] region unavailable — reusing ${prev.length} previous entries`);
+              merged = merged.concat(prev);
             }
           }
+          if (!anyOk) { console.error("All region fetches failed — leaving data unchanged."); process.exit(0); }
 
-          const results = {};
-          for (const reg of regions) results[reg] = await fetchRegion(reg);
-
-          if (!Object.values(results).some(r => r && r.ok)) {
-            console.error("All region fetches failed — leaving data unchanged.");
-            process.exit(0);
-          }
+          merged.sort((a,b) => (b.lp - a.lp) || a.name.localeCompare(b.name));
 
           const now = new Date().toISOString();
-          const nextPlayers = {};
-          for (const p of roster) {
-            const prevSnap = prev.players[p.key] || {};
-            const r = results[p.region];
-            if (!r || !r.ok) { nextPlayers[p.key] = prevSnap; console.log(`~ ${p.name} (${p.region}) region unavailable, kept previous`); continue; }
-            const entry = r.map.get(String(p.name).toLowerCase());
-            if (!entry) { nextPlayers[p.key] = Object.assign({}, prevSnap, { found: false }); console.log(`x ${p.name} (${p.region}) not found on ladder`); continue; }
-            const history = Array.isArray(prevSnap.history) ? prevSnap.history.slice() : [];
-            const last = history.length ? history[history.length - 1] : null;
-            if (!last || last.lp !== entry.lp) {
-              history.push({ t: now, lp: entry.lp });
-              if (history.length > cap) history.splice(0, history.length - cap);
-            }
-            const peak = Math.max(Number(prevSnap.peak) || 0, entry.lp);
-            nextPlayers[p.key] = { found: true, lp: entry.lp, rank: entry.rank, peak, history };
-            console.log(`> ${p.name} (${p.region}) = ${entry.lp} LP (rank ${entry.rank})`);
+          if (!existsSync("data")) mkdirSync("data", { recursive: true });
+
+          // live.json — full current ladder
+          writeFileSync(LIVE_PATH, JSON.stringify({ updated: now, regions: codes, count: merged.length, players: merged }));
+          console.log(`live.json: ${merged.length} players written`);
+
+          // history.json — append a top-N snapshot on cadence
+          const hist = readJson(HIST_PATH, { frameTopN: FRAME_TOP_N, frames: [] });
+          if (!Array.isArray(hist.frames)) hist.frames = [];
+          hist.frameTopN = FRAME_TOP_N;
+          const lastT = hist.frames.length ? new Date(hist.frames[hist.frames.length-1].t).getTime() : 0;
+          const dueMs = FRAME_INTERVAL_MIN * 60 * 1000;
+          if (!hist.frames.length || (Date.now() - lastT) >= dueMs) {
+            const top = merged.slice(0, FRAME_TOP_N).map(p => ({ n: p.name, r: p.region, lp: p.lp }));
+            hist.frames.push({ t: now, p: top });
+            if (hist.frames.length > MAX_FRAMES) hist.frames.splice(0, hist.frames.length - MAX_FRAMES);
+            writeFileSync(HIST_PATH, JSON.stringify(hist));
+            console.log(`history.json: appended snapshot (${hist.frames.length} frames total)`);
+          } else {
+            console.log(`history.json: next snapshot in ~${Math.round((dueMs - (Date.now()-lastT))/60000)} min`);
           }
-
-          const nextData = { updated: now, players: nextPlayers };
-          const rebuilt =
-            '<!-- RACE-DATA:START -->\n' +
-            '<script id="race-data" type="application/json">\n' +
-            JSON.stringify(nextData) + '\n' +
-            '</script>\n' +
-            '<!-- RACE-DATA:END -->';
-
-          writeFileSync(FILE, html.replace(DATA_RE, () => rebuilt));
-          console.log("index.html updated.");
           EOF
           node "$RUNNER_TEMP/collect.mjs"
 
       - name: Commit if changed
         run: |
-          if [[ -n "$(git status --porcelain index.html)" ]]; then
+          if [[ -n "$(git status --porcelain data/)" ]]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add index.html
-            git commit -m "chore: update ladder snapshot [skip ci]"
+            git add data/
+            git commit -m "chore: update ladder data [skip ci]"
             git push
           else
             echo "No changes to commit."
