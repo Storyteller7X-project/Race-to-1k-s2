@@ -1,1 +1,136 @@
+name: Collect LoR ladder
 
+# Běží každých 15 minut + jde spustit ručně (Actions -> Run workflow).
+# Cron interval si klidně změň (např. "*/30 * * * *" = každých 30 min).
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+# Potřeba, aby Action mohla commitnout aktualizovaný index.html.
+permissions:
+  contents: write
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Fetch ladder and update index.html
+        env:
+          RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
+        run: |
+          cat > "$RUNNER_TEMP/collect.mjs" <<'EOF'
+          import { readFileSync, writeFileSync } from "node:fs";
+
+          const FILE = "index.html";
+          const KEY = process.env.RIOT_API_KEY;
+          if (!KEY) { console.error("Missing RIOT_API_KEY secret."); process.exit(1); }
+
+          // LoR regional routing values
+          const ROUTING = { AM: "americas", EMEA: "europe", APAC: "asia", SEA: "sea" };
+
+          const html = readFileSync(FILE, "utf8");
+          const grab = (re, s) => { const m = s.match(re); return m ? m[1] : null; };
+
+          const cfgRaw = grab(/<script id="race-config" type="application\/json">([\s\S]*?)<\/script>/, html);
+          if (!cfgRaw) { console.error("race-config block not found."); process.exit(1); }
+          let cfg;
+          try { cfg = JSON.parse(cfgRaw); }
+          catch (e) { console.error("race-config is not valid JSON:", e.message); process.exit(1); }
+
+          const DATA_RE = /<!-- RACE-DATA:START -->[\s\S]*?<!-- RACE-DATA:END -->/;
+          const dataBlock = html.match(DATA_RE);
+          if (!dataBlock) { console.error("RACE-DATA markers not found."); process.exit(1); }
+          const prevRaw = grab(/<script id="race-data" type="application\/json">([\s\S]*?)<\/script>/, dataBlock[0]);
+          let prev = { updated: null, players: {} };
+          try { if (prevRaw && prevRaw.trim()) prev = JSON.parse(prevRaw); }
+          catch (e) { console.warn("Existing data block unreadable, starting fresh."); }
+          if (!prev.players) prev.players = {};
+
+          const cap = Number(cfg.historyCap) || 600;
+          const roster = Array.isArray(cfg.players) ? cfg.players : [];
+          const regions = [...new Set(roster.map(p => p.region))];
+
+          async function fetchRegion(reg) {
+            const routing = ROUTING[reg];
+            if (!routing) { console.error("Unknown region code:", reg); return { ok: false }; }
+            const url = `https://${routing}.api.riotgames.com/lor/ranked/v1/leaderboards`;
+            try {
+              const res = await fetch(url, { headers: { "X-Riot-Token": KEY } });
+              if (!res.ok) { console.error(`[${reg}] HTTP ${res.status} ${res.statusText}`); return { ok: false }; }
+              const json = await res.json();
+              const players = Array.isArray(json.players) ? json.players : [];
+              const map = new Map();
+              for (const pl of players) {
+                if (pl && typeof pl.name === "string")
+                  map.set(pl.name.toLowerCase(), { lp: Number(pl.lp) || 0, rank: Number(pl.rank) });
+              }
+              console.log(`[${reg}] ${players.length} players on ladder`);
+              return { ok: true, map };
+            } catch (e) {
+              console.error(`[${reg}] fetch error:`, e.message);
+              return { ok: false };
+            }
+          }
+
+          const results = {};
+          for (const reg of regions) results[reg] = await fetchRegion(reg);
+
+          if (!Object.values(results).some(r => r && r.ok)) {
+            console.error("All region fetches failed — leaving data unchanged.");
+            process.exit(0);
+          }
+
+          const now = new Date().toISOString();
+          const nextPlayers = {};
+          for (const p of roster) {
+            const prevSnap = prev.players[p.key] || {};
+            const r = results[p.region];
+            if (!r || !r.ok) { nextPlayers[p.key] = prevSnap; console.log(`~ ${p.name} (${p.region}) region unavailable, kept previous`); continue; }
+            const entry = r.map.get(String(p.name).toLowerCase());
+            if (!entry) { nextPlayers[p.key] = Object.assign({}, prevSnap, { found: false }); console.log(`x ${p.name} (${p.region}) not found on ladder`); continue; }
+            const history = Array.isArray(prevSnap.history) ? prevSnap.history.slice() : [];
+            const last = history.length ? history[history.length - 1] : null;
+            if (!last || last.lp !== entry.lp) {
+              history.push({ t: now, lp: entry.lp });
+              if (history.length > cap) history.splice(0, history.length - cap);
+            }
+            const peak = Math.max(Number(prevSnap.peak) || 0, entry.lp);
+            nextPlayers[p.key] = { found: true, lp: entry.lp, rank: entry.rank, peak, history };
+            console.log(`> ${p.name} (${p.region}) = ${entry.lp} LP (rank ${entry.rank})`);
+          }
+
+          const nextData = { updated: now, players: nextPlayers };
+          const rebuilt =
+            '<!-- RACE-DATA:START -->\n' +
+            '<script id="race-data" type="application/json">\n' +
+            JSON.stringify(nextData) + '\n' +
+            '</script>\n' +
+            '<!-- RACE-DATA:END -->';
+
+          writeFileSync(FILE, html.replace(DATA_RE, () => rebuilt));
+          console.log("index.html updated.");
+          EOF
+          node "$RUNNER_TEMP/collect.mjs"
+
+      - name: Commit if changed
+        run: |
+          if [[ -n "$(git status --porcelain index.html)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add index.html
+            git commit -m "chore: update ladder snapshot [skip ci]"
+            git push
+          else
+            echo "No changes to commit."
+          fi
