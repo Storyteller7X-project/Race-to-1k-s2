@@ -502,7 +502,10 @@
 
     players.sort(function(a,b){ return (b.lp-a.lp) || String(a.name).localeCompare(String(b.name)); });
     var regions = (live.regions||[]).join(" + ") || "AM + EMEA";
-    countEl.innerHTML = '<b>'+nfmt(players.length)+'</b> players in Masters &#183; '+esc(regions);
+    var total = (typeof live.total === "number") ? live.total : players.length;
+    countEl.innerHTML = (total > players.length)
+      ? '<b>Top '+nfmt(players.length)+'</b> of '+nfmt(total)+' in Masters &#183; '+esc(regions)
+      : '<b>'+nfmt(players.length)+'</b> players in Masters &#183; '+esc(regions);
     filterEl.style.display = "";
     board.classList.add("scroll");
 
