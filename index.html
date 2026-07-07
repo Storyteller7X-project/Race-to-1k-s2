@@ -4,28 +4,28 @@
 <!--
   ============================================================================
   RACE TO 1K  ·  běží CELÉ na GitHubu (žádný server, žádný Railway)
+  Sleduje CELÝ Master žebříček ze serverů AM + EMEA.
   ============================================================================
 
-  SOUBORY (jen dva):
-    - index.html                     -> tenhle soubor: web + hráči + data v jednom
-    - .github/workflows/collect.yml  -> GitHub Action, každých ~15 min stáhne LP z Riot API
+  SOUBORY:
+    - index.html                     -> tenhle web (načítá si data z JSON souborů níže)
+    - data/live.json                 -> celý aktuální žebříček (Action ho přepisuje každý běh)
+    - data/history.json              -> snímky top hráčů pro replay (Action dopisuje ~po 2 h)
+    - .github/workflows/collect.yml  -> GitHub Action, každých ~15 min stáhne žebříček z Riot API
 
-  NASTAVENÍ NA NOVÉM ÚČTU (krok za krokem):
-    1) Založ nový repozitář (klidně veřejný), např. "race-to-1k",
-       a nahraj do něj tenhle index.html + složku .github/workflows/collect.yml.
+  NASTAVENÍ NA NOVÉM ÚČTU:
+    1) Nahraj do repa všechny čtyři soubory (i složky data/ a .github/workflows/).
     2) Repo -> Settings -> Secrets and variables -> Actions -> New repository secret
          Name:   RIOT_API_KEY
          Secret: tvůj RGAPI-... klíč
-       (Klíč patří VÝHRADNĚ sem do Secrets. Nikdy ho nedávej do tohohle souboru
-        ani nikam, co se commituje — repo i Pages jsou veřejné pro celý internet.
-        Action ho čte automaticky a v logu je maskovaný.)
+       (Klíč patří VÝHRADNĚ sem do Secrets. Nikdy ho nedávej do žádného souboru,
+        co se commituje — repo i Pages jsou veřejné. Action ho čte automaticky.)
     3) Repo -> Settings -> Actions -> General -> Workflow permissions
-         -> zaškrtni "Read and write permissions"  (jinak Action nemůže zapsat data)
+         -> "Read and write permissions"  (jinak Action nemůže zapsat data)
     4) Repo -> Settings -> Pages -> Source: "Deploy from a branch" -> main / (root)
-    5) Uprav si níže blok <script id="race-config"> = svoji sestavu hráčů (návod je u něj).
-    6) Repo -> Actions -> "Collect LoR ladder" -> Run workflow = první data hned teď.
+    5) Repo -> Actions -> "Collect LoR ladder" -> Run workflow = první data hned teď.
 
-  Blok <script id="race-data"> si Action přepisuje SAMA — needituj ho ručně.
+  Datové soubory (data/*.json) si Action píše SAMA — needituj je ručně.
   ============================================================================
 -->
 <meta charset="UTF-8">
@@ -33,38 +33,25 @@
 <title>Race to 1K</title>
 
 <!-- ==========================================================================
-     KONFIGURACE — TOHLE EDITUJEŠ TY (seznam účastníků eventu)
-     Do "players" přidávej řádky ve tvaru:
-       { "key": "unikatni-id", "name": "PresneJmenoVMasters", "region": "EMEA" }
-     - key:    libovolné unikátní id bez mezer (drží se podle něj historie LP)
-     - name:   MUSÍ přesně sedět se jménem hráče na Master žebříčku LoR
-               (porovnává se bez ohledu na velikost písmen)
-     - region: jeden z  AM | EMEA | APAC | SEA
-     - effect (nepovinné): storyteller | glitch | gold | stream
-     - twitch (jen s effect "stream"): kanál, udělá z jména odkaz + LIVE odznak
-     Kdo zrovna NENÍ v Masters, se na webu vůbec nezobrazí — schová se, dokud
-     do Masters nevyleze. Prázdný seznam = prázdná tabulka.
+     KONFIGURACE — TOHLE EDITUJEŠ TY (nepovinné doladění vzhledu)
+     - target:      cílové LP (finiš), default 1000
+     - replayLanes: kolik hráčů ukázat v replay závodě (top X), default 15
+     - highlights:  zvýrazni konkrétní lidi. Klíč = jméno z žebříčku malými písmeny.
+                    effect: storyteller | glitch | gold | stream
+                    twitch (jen se "stream"): kanál -> odkaz + LIVE odznak
+                    Příklad:   "storyteller": { "effect": "storyteller" }
+     Které servery se sbírají (AM + EMEA) se nastavuje v collect.yml (REGIONS).
      ========================================================================== -->
 <script id="race-config" type="application/json">
 {
   "title": "RACE TO 1K",
   "subtitle": "LND community event season 2",
   "target": 1000,
-  "raceStart": "2026-07-07T00:00:00Z",
-  "historyCap": 600,
-  "players": [
-  ]
+  "replayLanes": 15,
+  "highlights": {
+  }
 }
 </script>
-
-<!-- ==========================================================================
-     DATA — NEEDITUJ RUČNĚ. Tenhle blok přepisuje GitHub Action.
-     ========================================================================== -->
-<!-- RACE-DATA:START -->
-<script id="race-data" type="application/json">
-{ "updated": null, "players": {} }
-</script>
-<!-- RACE-DATA:END -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -199,29 +186,27 @@
     color:var(--muted);text-transform:uppercase;
   }
 
-  /* effect: storyteller */
-  .fx-storyteller .name{color:var(--teal);text-shadow:0 0 14px rgba(33,230,193,.55)}
-  .fx-storyteller .name .mark{color:var(--teal)}
+  /* name effects (highlights) — target shared .pname class */
+  .fx-storyteller .pname{color:var(--teal);text-shadow:0 0 14px rgba(33,230,193,.55)}
+  .fx-storyteller .pname .mark{color:var(--teal)}
   .mark{font-size:.85em}
 
-  /* effect: gold */
-  .fx-gold .name{
+  .fx-gold .pname{
     background:linear-gradient(100deg,#fff4cf,var(--gold),#b8862a,var(--gold));
     background-size:220% auto;-webkit-background-clip:text;background-clip:text;color:transparent;
     animation:shimmer 4s linear infinite;
   }
   @keyframes shimmer{to{background-position:220% center}}
 
-  /* effect: glitch */
-  .fx-glitch .name{position:relative;color:var(--text)}
-  .fx-glitch .name .glitch{position:relative;display:inline-block}
-  .fx-glitch .name .glitch::before,
-  .fx-glitch .name .glitch::after{
+  .fx-glitch .pname{position:relative;color:var(--text)}
+  .fx-glitch .pname .glitch{position:relative;display:inline-block}
+  .fx-glitch .pname .glitch::before,
+  .fx-glitch .pname .glitch::after{
     content:attr(data-text);position:absolute;left:0;top:0;width:100%;overflow:hidden;
     clip-path:inset(0 0 0 0);
   }
-  .fx-glitch .name .glitch::before{color:var(--rose);animation:glitchA 2.6s infinite steps(2,end)}
-  .fx-glitch .name .glitch::after{color:var(--teal);animation:glitchB 3.1s infinite steps(2,end)}
+  .fx-glitch .pname .glitch::before{color:var(--rose);animation:glitchA 2.6s infinite steps(2,end)}
+  .fx-glitch .pname .glitch::after{color:var(--teal);animation:glitchB 3.1s infinite steps(2,end)}
   @keyframes glitchA{0%,92%,100%{transform:translate(0);clip-path:inset(0 0 100% 0)}93%{transform:translate(-2px,-1px);clip-path:inset(10% 0 55% 0)}96%{transform:translate(2px,1px);clip-path:inset(60% 0 8% 0)}}
   @keyframes glitchB{0%,90%,100%{transform:translate(0);clip-path:inset(100% 0 0 0)}91%{transform:translate(2px,1px);clip-path:inset(20% 0 40% 0)}97%{transform:translate(-2px,0);clip-path:inset(50% 0 20% 0)}}
 
@@ -290,6 +275,56 @@
     .scale{margin-left:0}
   }
 
+  /* ---------- live list head (count + filter) ---------- */
+  .board-head{
+    display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;
+    margin-bottom:.6rem;
+  }
+  .count{font-family:'Share Tech Mono',monospace;font-size:.8rem;color:var(--muted);letter-spacing:.04em}
+  .count b{color:var(--teal);font-weight:400}
+  .filter{
+    font-family:'Share Tech Mono',monospace;font-size:.82rem;color:var(--text);
+    background:var(--surface);border:1px solid var(--line);border-radius:8px;
+    padding:.45rem .7rem;flex:0 1 260px;min-width:180px;outline:none;transition:border-color .2s;
+  }
+  .filter:focus{border-color:var(--teal)}
+  .filter::placeholder{color:var(--muted)}
+
+  /* ---------- live list (scrollable — all players) ---------- */
+  .board.scroll{
+    max-height:min(70vh,760px);overflow-y:auto;padding-right:.35rem;
+    display:flex;flex-direction:column;gap:.4rem;
+    scrollbar-width:thin;scrollbar-color:var(--line) transparent;
+  }
+  .board.scroll::-webkit-scrollbar{width:9px}
+  .board.scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:99px}
+  .lrow{
+    display:grid;grid-template-columns:3rem clamp(120px,26vw,230px) 1fr auto;
+    align-items:center;gap:.55rem .85rem;padding:.5rem clamp(.55rem,2vw,.95rem);
+    background:linear-gradient(180deg,var(--surface),var(--bg-2));
+    border:1px solid var(--line);border-radius:10px;
+  }
+  .lrow.done{border-color:rgba(255,207,74,.55);box-shadow:0 0 0 1px rgba(255,207,74,.22)}
+  .lrank{font-family:'Share Tech Mono',monospace;font-size:.8rem;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+  .lrow.top1 .lrank{color:var(--gold);font-weight:700}
+  .lname{
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:clamp(.82rem,1.9vw,.98rem);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:.4rem;
+  }
+  .lregion{font-family:'Share Tech Mono',monospace;font-size:.6rem;color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
+  .lbar{position:relative;height:10px;border-radius:999px;background:var(--track);border:1px solid var(--line);overflow:hidden}
+  .lfill{position:absolute;inset:0 auto 0 0;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--teal),var(--purple))}
+  .lrow.done .lfill{background:linear-gradient(90deg,var(--gold),#ffe9a8,var(--gold))}
+  .llp{font-family:'Orbitron',sans-serif;font-weight:900;font-size:clamp(.82rem,1.9vw,1rem);color:var(--text);min-width:5.5ch;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .llp small{font-size:.55em;color:var(--muted);font-weight:500;margin-left:.1rem}
+  .no-match{text-align:center;color:var(--muted);font-family:'Share Tech Mono',monospace;font-size:.8rem;padding:1.5rem 0}
+
+  @media (max-width:560px){
+    .lrow{grid-template-columns:2.3rem 1fr auto;gap:.4rem .55rem}
+    .lrow .lbar{display:none}
+    .lregion{display:none}
+  }
+
   /* ---------- replay controls ---------- */
   .replay-bar{
     display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;
@@ -319,7 +354,7 @@
   /* ---------- replay stage ---------- */
   #replay-stage{position:relative;display:none}
   .rrow{
-    position:absolute;left:0;right:0;top:0;height:60px;
+    position:absolute;left:0;right:0;top:0;height:56px;
     display:grid;grid-template-columns:2.2rem clamp(120px,22vw,190px) 1fr auto;
     align-items:center;gap:.55rem .85rem;padding:0 clamp(.6rem,2vw,1.05rem);
     background:linear-gradient(180deg,var(--surface),var(--bg-2));
@@ -354,8 +389,8 @@
   }
 
   @media (prefers-reduced-motion:reduce){
-    .aurora,.live-dot,.live b,.fx-gold .name{animation:none}
-    .fx-glitch .name .glitch::before,.fx-glitch .name .glitch::after{display:none}
+    .aurora,.live-dot,.live b,.fx-gold .pname{animation:none}
+    .fx-glitch .pname .glitch::before,.fx-glitch .pname .glitch::after{display:none}
     .fill{transition:none}
     .rrow{transition:opacity .25s,border-color .3s,box-shadow .3s}
   }
@@ -388,8 +423,12 @@
     <button class="rp-btn ghost" id="rp-exit" title="Back to live standings" hidden>&#10005; Live</button>
   </div>
 
+  <div class="board-head" id="board-head">
+    <span class="count" id="count"></span>
+    <input class="filter" id="filter" type="text" placeholder="Filter by name…" autocomplete="off" spellcheck="false">
+  </div>
   <div class="scale"><span>0</span><span class="goal" id="goal-label">1000 LP</span></div>
-  <div class="board" id="board"></div>
+  <div class="board scroll" id="board"></div>
   <div id="replay-stage" aria-hidden="true"></div>
 
   <footer>
@@ -402,317 +441,278 @@
   "use strict";
 
   function readJSON(id, fallback){
-    try{
-      var el = document.getElementById(id);
-      if(!el) return fallback;
-      var txt = el.textContent.trim();
-      return txt ? JSON.parse(txt) : fallback;
-    }catch(e){ console.error("Failed to parse #"+id, e); return fallback; }
+    try{ var el=document.getElementById(id); if(!el) return fallback; var t=el.textContent.trim(); return t?JSON.parse(t):fallback; }
+    catch(e){ console.error("parse #"+id, e); return fallback; }
   }
-
-  function esc(s){
-    return String(s).replace(/[&<>"']/g, function(c){
-      return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];
-    });
-  }
-
+  function esc(s){ return String(s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];}); }
+  function nfmt(n){ return Number(n).toLocaleString(); }
   function timeAgo(iso){
     if(!iso) return "waiting for sync";
-    var then = new Date(iso).getTime();
-    if(isNaN(then)) return "waiting for sync";
-    var s = Math.max(0, Math.floor((Date.now()-then)/1000));
-    if(s < 60) return "updated just now";
-    var m = Math.floor(s/60);
-    if(m < 60) return "updated "+m+"m ago";
-    var h = Math.floor(m/60);
-    if(h < 24) return "updated "+h+"h ago";
-    var d = Math.floor(h/24);
-    return "updated "+d+"d ago";
+    var then=new Date(iso).getTime(); if(isNaN(then)) return "waiting for sync";
+    var s=Math.max(0,Math.floor((Date.now()-then)/1000));
+    if(s<60) return "updated just now";
+    var m=Math.floor(s/60); if(m<60) return "updated "+m+"m ago";
+    var h=Math.floor(m/60); if(h<24) return "updated "+h+"h ago";
+    return "updated "+Math.floor(h/24)+"d ago";
   }
 
-  function nameMarkup(p){
-    if(p.effect === "glitch") return '<span class="glitch" data-text="'+esc(p.name)+'">'+esc(p.name)+'</span>';
-    if(p.effect === "storyteller") return '<span class="mark">&#10022;</span>'+esc(p.name);
-    return esc(p.name);
-  }
-
-  var cfg  = readJSON("race-config", {});
-  var data = readJSON("race-data", {updated:null, players:{}});
+  var cfg = readJSON("race-config", {});
   var target = Number(cfg.target) || 1000;
-  var roster = Array.isArray(cfg.players) ? cfg.players : [];
-  var snaps  = (data && data.players) ? data.players : {};
+  var laneCount = Math.max(3, Number(cfg.replayLanes) || 15);
+  var highlights = (cfg.highlights && typeof cfg.highlights === "object") ? cfg.highlights : {};
+
+  function hlFor(name){ return highlights[String(name).toLowerCase()] || null; }
+  function fxClass(hl){ return hl && hl.effect ? " fx-"+hl.effect : ""; }
+  function nameInner(name, hl){
+    if(hl && hl.effect === "glitch") return '<span class="glitch" data-text="'+esc(name)+'">'+esc(name)+'</span>';
+    if(hl && hl.effect === "storyteller") return '<span class="mark">&#10022;</span>'+esc(name);
+    return esc(name);
+  }
+  function liveBadge(hl){
+    if(hl && hl.effect === "stream" && hl.twitch)
+      return ' <a class="live" href="https://twitch.tv/'+esc(hl.twitch)+'" target="_blank" rel="noopener"><b></b>LIVE</a>';
+    return "";
+  }
 
   document.getElementById("title").textContent = cfg.title || "RACE TO 1K";
   document.getElementById("subtitle").textContent = cfg.subtitle || "";
   document.getElementById("goal-label").textContent = target + " LP";
-  document.getElementById("updated-text").textContent = timeAgo(data.updated);
 
-  var board = document.getElementById("board");
+  var board     = document.getElementById("board");
+  var boardHead = document.getElementById("board-head");
+  var countEl   = document.getElementById("count");
+  var filterEl  = document.getElementById("filter");
+  var updEl     = document.getElementById("updated-text");
+  var scale     = document.querySelector(".scale");
 
-  // =====================================================================
-  // LIVE BOARD (current standings)
-  // =====================================================================
-  function renderLive(){
-    var rows = roster.map(function(p){
-      var s = snaps[p.key] || {};
-      var found = !!s.found;
-      var lp = found && typeof s.lp === "number" ? s.lp : 0;
-      var start = 0;
-      if(Array.isArray(s.history) && s.history.length && typeof s.history[0].lp === "number") start = s.history[0].lp;
-      return {
-        cfg:p, found:found, lp:lp,
-        peak:(typeof s.peak === "number") ? s.peak : lp,
-        delta: found ? (lp - start) : 0,
-        done: lp >= target
-      };
-    }).filter(function(r){ return r.found; });
+  // ==================================================================
+  // LIVE — all AM+EMEA Masters (scrollable + filter)
+  // ==================================================================
+  function renderLive(live){
+    var players = (live && Array.isArray(live.players)) ? live.players.slice() : [];
+    updEl.textContent = timeAgo(live && live.updated);
 
-    rows.sort(function(a,b){
-      if(b.lp !== a.lp) return b.lp - a.lp;
-      return String(a.cfg.name).localeCompare(String(b.cfg.name));
-    });
-
-    if(!roster.length){
-      board.innerHTML = '<div class="empty"><div class="big">No participants yet</div>Add players to the roster to start tracking the race.</div>';
-      return;
-    }
-    if(!rows.length){
-      board.innerHTML = '<div class="empty"><div class="big">No one in Masters yet</div>Players appear here as soon as they climb into Master.</div>';
+    if(!players.length){
+      countEl.textContent = "";
+      filterEl.style.display = "none";
+      board.classList.remove("scroll");
+      board.innerHTML = '<div class="empty"><div class="big">No data yet</div>Run the collector (Actions &#8594; Collect LoR ladder &#8594; Run workflow) to pull the ladder.</div>';
       return;
     }
 
-    board.innerHTML = rows.map(function(r, i){
-      var pos = i + 1;
-      var p = r.cfg;
-      var cls = ["row", p.effect ? "fx-"+p.effect : ""];
-      if(r.done) cls.push("done"); else if(i === 0) cls.push("leader");
-      var rankCls = "rank" + (pos===1?" p1":pos===2?" p2":pos===3?" p3":"");
-      var live = (p.effect === "stream" && p.twitch)
-        ? ' <a class="live" href="https://twitch.tv/'+esc(p.twitch)+'" target="_blank" rel="noopener"><b></b>LIVE</a>' : '';
-      var pct = Math.max(0, Math.min(100, (r.lp/target)*100));
-      var deltaHtml = r.delta > 0 ? '<span class="delta up">&#9650; '+r.delta+'</span>'
-                    : r.delta < 0 ? '<span class="delta down">&#9660; '+Math.abs(r.delta)+'</span>'
-                    : '<span class="delta flat">&#8212;</span>';
-      var rightHtml = r.done
-        ? '<span class="remaining goalhit">&#9733; REACHED 1K</span>'
-        : '<span class="remaining">'+(target - r.lp)+' to '+target+'</span>';
+    players.sort(function(a,b){ return (b.lp-a.lp) || String(a.name).localeCompare(String(b.name)); });
+    var regions = (live.regions||[]).join(" + ") || "AM + EMEA";
+    countEl.innerHTML = '<b>'+nfmt(players.length)+'</b> players in Masters &#183; '+esc(regions);
+    filterEl.style.display = "";
+    board.classList.add("scroll");
+
+    board.innerHTML = players.map(function(p, i){
+      var pos = i+1;
+      var hl = hlFor(p.name);
+      var done = p.lp >= target;
+      var cls = ["lrow", fxClass(hl).trim()];
+      if(done) cls.push("done");
+      if(pos===1) cls.push("top1"); else if(pos===2) cls.push("top2"); else if(pos===3) cls.push("top3");
+      var pct = Math.max(1.5, Math.min(100, (p.lp/target)*100));
       return ''+
-        '<div class="'+cls.join(" ").trim()+'">'+
-          '<div class="who">'+
-            '<div class="'+rankCls+'">'+pos+'</div>'+
-            '<div class="namewrap">'+
-              '<div class="name">'+nameMarkup(p)+live+'</div>'+
-              '<div class="region-tag">'+esc(p.region||"")+'</div>'+
-            '</div>'+
-          '</div>'+
-          '<div class="prog">'+
-            '<div class="bar"><div class="fill" data-w="'+pct.toFixed(2)+'%" style="width:0"></div></div>'+
-            '<div class="meta">'+
-              '<span class="lp">'+r.lp+'<small>LP</small> '+deltaHtml+'</span>'+
-              '<span class="peak">peak '+r.peak+'</span>'+
-              rightHtml+
-            '</div>'+
-          '</div>'+
+        '<div class="'+cls.join(" ").replace(/\s+/g," ").trim()+'" data-name="'+esc(String(p.name).toLowerCase())+'">'+
+          '<div class="lrank">'+pos+'</div>'+
+          '<div class="lname pname">'+nameInner(p.name, hl)+liveBadge(hl)+'<span class="lregion">'+esc(p.region||"")+'</span></div>'+
+          '<div class="lbar"><div class="lfill" style="width:'+pct.toFixed(1)+'%"></div></div>'+
+          '<div class="llp">'+nfmt(p.lp)+'<small>LP</small></div>'+
         '</div>';
-    }).join("");
+    }).join("") + '<div class="no-match" id="no-match" style="display:none">No player matches that name.</div>';
 
-    setTimeout(function(){
-      var fills = board.querySelectorAll(".fill");
-      for(var i=0;i<fills.length;i++){ fills[i].style.width = fills[i].getAttribute("data-w"); }
-    }, 60);
+    var rows = board.querySelectorAll(".lrow");
+    var noMatch = document.getElementById("no-match");
+    filterEl.oninput = function(){
+      var q = filterEl.value.trim().toLowerCase();
+      var shown = 0;
+      for(var i=0;i<rows.length;i++){
+        var match = !q || rows[i].getAttribute("data-name").indexOf(q) !== -1;
+        rows[i].style.display = match ? "" : "none";
+        if(match) shown++;
+      }
+      noMatch.style.display = shown ? "none" : "";
+    };
   }
 
-  // =====================================================================
-  // SEASON REPLAY (play the whole race back like a video)
-  // =====================================================================
+  // ==================================================================
+  // REPLAY — top-lane bar race, built from history frames (lazy-loaded)
+  // ==================================================================
   function initReplay(){
-    var playBtn    = document.getElementById("rp-play");
-    var restartBtn = document.getElementById("rp-restart");
-    var exitBtn    = document.getElementById("rp-exit");
-    var track      = document.getElementById("rp-track");
-    var fillEl     = document.getElementById("rp-fill");
-    var handle     = document.getElementById("rp-handle");
-    var timeLbl    = document.getElementById("rp-time");
-    var speeds     = document.getElementById("rp-speeds");
-    var stage      = document.getElementById("replay-stage");
+    var playBtn=document.getElementById("rp-play"), restartBtn=document.getElementById("rp-restart"),
+        exitBtn=document.getElementById("rp-exit"), track=document.getElementById("rp-track"),
+        fillEl=document.getElementById("rp-fill"), handle=document.getElementById("rp-handle"),
+        timeLbl=document.getElementById("rp-time"), speeds=document.getElementById("rp-speeds"),
+        stage=document.getElementById("replay-stage");
 
-    // participants that have at least one recorded LP point
-    var parts = roster.map(function(p){
-      var s = snaps[p.key] || {};
-      var pts = (Array.isArray(s.history) ? s.history : [])
-        .map(function(h){ return { t: new Date(h.t).getTime(), lp: Number(h.lp)||0 }; })
-        .filter(function(h){ return !isNaN(h.t); })
-        .sort(function(a,b){ return a.t - b.t; });
-      return { cfg:p, pts:pts };
-    }).filter(function(pp){ return pp.pts.length > 0; });
+    var ROW_H = 56;
+    var ready=false, building=false;
+    var contenders=[], rowEls={}, startT=0, endT=0, span=0;
+    var BASE=30000, mult=1, progress=0, playing=false, rafId=null, lastTs=0;
 
-    var allT = [];
-    parts.forEach(function(pp){ pp.pts.forEach(function(x){ allT.push(x.t); }); });
-    var upd = data.updated ? new Date(data.updated).getTime() : NaN;
-    if(!isNaN(upd)) allT.push(upd);
-    var startT = allT.length ? Math.min.apply(null, allT) : 0;
-    var endT   = allT.length ? Math.max.apply(null, allT) : 0;
-    var span   = endT - startT;
-
-    if(parts.length === 0 || span <= 0){
-      playBtn.disabled = true;
-      playBtn.innerHTML = "&#9654; Replay season";
-      playBtn.title = "Replay unlocks once there's enough race history recorded.";
-      return;
-    }
-
-    var ROW_H = 60;
-    stage.innerHTML = "";
-    parts.forEach(function(pp){
-      var p = pp.cfg;
-      var el = document.createElement("div");
-      el.className = "rrow" + (p.effect ? " fx-"+p.effect : "");
-      var live = (p.effect === "stream" && p.twitch) ? ' <span class="live"><b></b>LIVE</span>' : '';
-      el.innerHTML =
-        '<div class="rrank"></div>'+
-        '<div class="rname">'+nameMarkup(p)+live+'<span class="rregion">'+esc(p.region||"")+'</span></div>'+
-        '<div class="rbar"><div class="rfill"></div></div>'+
-        '<div class="rlp"></div>';
-      el.style.opacity = "0";
-      stage.appendChild(el);
-    });
-    var rowEls = {};
-    parts.forEach(function(pp, idx){
-      var el = stage.children[idx];
-      rowEls[pp.cfg.key] = { el:el, rank:el.querySelector(".rrank"), fill:el.querySelector(".rfill"), lp:el.querySelector(".rlp") };
-    });
-    stage.style.height = (parts.length * ROW_H) + "px";
+    function setPlay(t){ playBtn.innerHTML = t; }
 
     function lpAt(pts, t){
       if(t < pts[0].t) return { present:false, lp:0 };
       if(t >= pts[pts.length-1].t) return { present:true, lp: pts[pts.length-1].lp };
-      var i = 0;
-      while(i < pts.length-1 && t >= pts[i+1].t) i++;
-      var a = pts[i], b = pts[i+1];
-      var frac = (b.t === a.t) ? 0 : (t - a.t)/(b.t - a.t);
-      return { present:true, lp: a.lp + (b.lp - a.lp)*frac };
+      var i=0; while(i<pts.length-1 && t>=pts[i+1].t) i++;
+      var a=pts[i], b=pts[i+1];
+      var frac = (b.t===a.t) ? 0 : (t-a.t)/(b.t-a.t);
+      return { present:true, lp: a.lp+(b.lp-a.lp)*frac };
+    }
+
+    function buildFromHistory(hist){
+      var frames = (hist && Array.isArray(hist.frames) ? hist.frames : [])
+        .map(function(f){ return { t:new Date(f.t).getTime(), p:Array.isArray(f.p)?f.p:[] }; })
+        .filter(function(f){ return !isNaN(f.t); })
+        .sort(function(a,b){ return a.t-b.t; });
+      if(frames.length < 2) return false;
+
+      var seen = {};
+      frames.forEach(function(f){ f.p.slice(0, laneCount).forEach(function(x){ seen[x.n]=true; }); });
+
+      var series={}, region={}, peak={};
+      frames.forEach(function(f){
+        f.p.forEach(function(x){
+          if(!seen[x.n]) return;
+          (series[x.n]=series[x.n]||[]).push({ t:f.t, lp:Number(x.lp)||0 });
+          if(region[x.n]===undefined) region[x.n]=x.r;
+          peak[x.n]=Math.max(peak[x.n]||0, Number(x.lp)||0);
+        });
+      });
+
+      var names = Object.keys(series);
+      var CAP = 80;
+      if(names.length > CAP){ names.sort(function(a,b){ return peak[b]-peak[a]; }); names = names.slice(0, CAP); }
+      contenders = names.map(function(n){ return { name:n, region:region[n]||"", pts:series[n] }; });
+
+      startT = frames[0].t; endT = frames[frames.length-1].t; span = endT-startT;
+      if(span <= 0) return false;
+
+      stage.innerHTML = "";
+      contenders.forEach(function(c){
+        var hl = hlFor(c.name);
+        var el = document.createElement("div");
+        el.className = "rrow" + fxClass(hl);
+        el.innerHTML =
+          '<div class="rrank"></div>'+
+          '<div class="rname pname">'+nameInner(c.name, hl)+liveBadge(hl)+'<span class="rregion">'+esc(c.region)+'</span></div>'+
+          '<div class="rbar"><div class="rfill"></div></div>'+
+          '<div class="rlp"></div>';
+        el.style.opacity = "0";
+        stage.appendChild(el);
+      });
+      contenders.forEach(function(c, i){
+        var el = stage.children[i];
+        rowEls[c.name] = { el:el, rank:el.querySelector(".rrank"), fill:el.querySelector(".rfill"), lp:el.querySelector(".rlp") };
+      });
+      stage.style.height = (laneCount * ROW_H) + "px";
+      return true;
     }
 
     function renderFrame(prog){
       var t = startT + prog*span;
-      var states = parts.map(function(pp){
-        var r = lpAt(pp.pts, t);
-        return { key: pp.cfg.key, present:r.present, lp:r.lp };
-      });
-      var present = states.filter(function(s){ return s.present; })
-                          .sort(function(a,b){ return b.lp - a.lp; });
-      var rankByKey = {};
-      present.forEach(function(s, idx){ rankByKey[s.key] = idx; });
+      var states = contenders.map(function(c){ var r=lpAt(c.pts,t); return { name:c.name, present:r.present, lp:r.lp }; });
+      var present = states.filter(function(s){ return s.present; }).sort(function(a,b){ return b.lp-a.lp; });
+      var rankByName = {};
+      present.forEach(function(s, idx){ rankByName[s.name]=idx; });
 
       states.forEach(function(s){
-        var ref = rowEls[s.key];
-        if(!ref) return;
-        if(!s.present){
+        var ref = rowEls[s.name]; if(!ref) return;
+        var idx = rankByName[s.name];
+        if(!s.present || idx === undefined || idx >= laneCount){
           ref.el.style.opacity = "0";
-          ref.el.style.transform = "translateY(-10px)";
+          ref.el.style.transform = "translateY("+((idx>=laneCount)? (laneCount*ROW_H) : -10)+"px)";
           return;
         }
-        var idx = rankByKey[s.key];
         ref.el.style.opacity = "1";
-        ref.el.style.transform = "translateY(" + (idx*ROW_H) + "px)";
+        ref.el.style.transform = "translateY("+(idx*ROW_H)+"px)";
         var pct = Math.max(0, Math.min(100, (s.lp/target)*100));
-        ref.fill.style.width = pct.toFixed(2) + "%";
-        ref.lp.textContent = Math.round(s.lp) + " LP";
-        var pos = idx + 1;
+        ref.fill.style.width = pct.toFixed(2)+"%";
+        ref.lp.textContent = Math.round(s.lp)+" LP";
+        var pos = idx+1;
         ref.rank.className = "rrank" + (pos===1?" p1":pos===2?" p2":pos===3?" p3":"");
         ref.rank.textContent = pos;
-        if(s.lp >= target) ref.el.classList.add("done"); else ref.el.classList.remove("done");
+        if(s.lp>=target) ref.el.classList.add("done"); else ref.el.classList.remove("done");
       });
 
-      fillEl.style.width = (prog*100).toFixed(2) + "%";
-      handle.style.left  = (prog*100).toFixed(2) + "%";
+      fillEl.style.width = (prog*100).toFixed(2)+"%";
+      handle.style.left  = (prog*100).toFixed(2)+"%";
       var d = new Date(t);
-      timeLbl.textContent =
-        d.toLocaleDateString(undefined,{month:"short",day:"numeric"}) + " \u00b7 " +
-        d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"});
+      timeLbl.textContent = d.toLocaleDateString(undefined,{month:"short",day:"numeric"}) + " \u00b7 " +
+                            d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"});
     }
 
-    var BASE = 30000, mult = 1, progress = 0, playing = false, rafId = null, lastTs = 0;
-    function clipDur(){ return BASE * mult; }
-
+    function clipDur(){ return BASE*mult; }
     function tick(ts){
       if(!playing) return;
-      if(!lastTs) lastTs = ts;
-      var dt = ts - lastTs; lastTs = ts;
-      progress += dt / clipDur();
-      if(progress >= 1){ progress = 1; renderFrame(1); endState(); return; }
+      if(!lastTs) lastTs=ts;
+      var dt=ts-lastTs; lastTs=ts;
+      progress += dt/clipDur();
+      if(progress>=1){ progress=1; renderFrame(1); endState(); return; }
       renderFrame(progress);
-      rafId = requestAnimationFrame(tick);
+      rafId=requestAnimationFrame(tick);
     }
-
-    function showReplayUI(on){ restartBtn.hidden = !on; exitBtn.hidden = !on; track.hidden = !on; timeLbl.hidden = !on; }
-    function enter(){
-      board.style.display = "none";
-      stage.style.display = "block";
-      stage.setAttribute("aria-hidden","false");
-      showReplayUI(true);
-    }
+    function showUI(on){ restartBtn.hidden=!on; exitBtn.hidden=!on; track.hidden=!on; timeLbl.hidden=!on; }
+    function enter(){ board.style.display="none"; boardHead.style.display="none"; if(scale) scale.style.display="none"; stage.style.display="block"; stage.setAttribute("aria-hidden","false"); showUI(true); }
+    function exit(){ pauseOnly(); progress=0; stage.style.display="none"; stage.setAttribute("aria-hidden","true"); board.style.display=""; boardHead.style.display=""; if(scale) scale.style.display=""; showUI(false); setPlay("&#9654; Replay season"); }
     function play(){
       if(rafId) cancelAnimationFrame(rafId);
-      if(progress >= 1) progress = 0;
-      if(stage.style.display !== "block") enter();
-      playing = true; lastTs = 0;
-      playBtn.innerHTML = "&#10073;&#10073; Pause";
-      rafId = requestAnimationFrame(tick);
+      if(progress>=1) progress=0;
+      if(stage.style.display!=="block") enter();
+      playing=true; lastTs=0; setPlay("&#10073;&#10073; Pause"); rafId=requestAnimationFrame(tick);
     }
-    function pause(){
-      playing = false;
-      if(rafId) cancelAnimationFrame(rafId);
-      playBtn.innerHTML = "&#9654; Resume";
-    }
-    function endState(){
-      playing = false;
-      if(rafId) cancelAnimationFrame(rafId);
-      playBtn.innerHTML = "&#9654; Replay again";
-    }
-    function exit(){
-      pause();
-      progress = 0;
-      stage.style.display = "none";
-      stage.setAttribute("aria-hidden","true");
-      board.style.display = "";
-      showReplayUI(false);
-      playBtn.innerHTML = "&#9654; Replay season";
+    function pauseOnly(){ playing=false; if(rafId) cancelAnimationFrame(rafId); }
+    function pause(){ pauseOnly(); setPlay("&#9654; Resume"); }
+    function endState(){ pauseOnly(); setPlay("&#9654; Replay again"); }
+
+    async function ensureReady(){
+      if(ready) return true;
+      if(building) return false;
+      building = true;
+      setPlay("&#8987; Loading\u2026"); playBtn.disabled = true;
+      var hist = null;
+      try{ var r = await fetch("data/history.json?_="+Date.now()); if(r.ok) hist = await r.json(); }
+      catch(e){ /* ignore */ }
+      building = false; playBtn.disabled = false;
+      if(hist && buildFromHistory(hist)){ ready = true; setPlay("&#9654; Replay season"); return true; }
+      setPlay("&#9654; Replay season");
+      playBtn.disabled = true;
+      playBtn.title = "Replay unlocks once enough history is recorded (needs a few snapshots over time).";
+      return false;
     }
 
-    playBtn.addEventListener("click", function(){ if(playing) pause(); else play(); });
-    restartBtn.addEventListener("click", function(){ progress = 0; lastTs = 0; play(); });
+    playBtn.addEventListener("click", async function(){
+      if(playBtn.disabled) return;
+      if(playing){ pause(); return; }
+      if(await ensureReady()) play();
+    });
+    restartBtn.addEventListener("click", function(){ if(!ready) return; progress=0; lastTs=0; play(); });
     exitBtn.addEventListener("click", exit);
 
-    var speedBtns = speeds.querySelectorAll(".rp-speed");
-    for(var i=0;i<speedBtns.length;i++){
-      speedBtns[i].addEventListener("click", function(){
-        for(var j=0;j<speedBtns.length;j++) speedBtns[j].classList.remove("active");
-        this.classList.add("active");
-        mult = parseFloat(this.getAttribute("data-mult")) || 1;
-        lastTs = 0;
+    var sBtns = speeds.querySelectorAll(".rp-speed");
+    for(var i=0;i<sBtns.length;i++){
+      sBtns[i].addEventListener("click", function(){
+        for(var j=0;j<sBtns.length;j++) sBtns[j].classList.remove("active");
+        this.classList.add("active"); mult=parseFloat(this.getAttribute("data-mult"))||1; lastTs=0;
       });
     }
 
-    // scrubbing (click / drag on the timeline)
-    var scrubbing = false, wasPlaying = false;
+    var scrubbing=false, wasPlaying=false;
     function seekFromEvent(e){
-      var rect = track.getBoundingClientRect();
-      if(!rect.width) return;
-      var cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
-      progress = Math.max(0, Math.min(1, (cx - rect.left)/rect.width));
-      renderFrame(progress);
+      var rect=track.getBoundingClientRect(); if(!rect.width) return;
+      var cx=(e.touches&&e.touches[0])?e.touches[0].clientX:e.clientX;
+      progress=Math.max(0,Math.min(1,(cx-rect.left)/rect.width)); renderFrame(progress);
     }
-    function startScrub(e){
-      if(track.hidden) return;
-      if(stage.style.display !== "block") enter();
-      scrubbing = true; wasPlaying = playing;
-      if(playing) pause();
-      seekFromEvent(e);
-      if(e.cancelable) e.preventDefault();
+    async function startScrub(e){
+      if(track.hidden){ if(!(await ensureReady())) return; if(stage.style.display!=="block") enter(); }
+      scrubbing=true; wasPlaying=playing; if(playing) pauseOnly();
+      seekFromEvent(e); if(e.cancelable) e.preventDefault();
     }
     function moveScrub(e){ if(scrubbing) seekFromEvent(e); }
-    function endScrub(){ if(!scrubbing) return; scrubbing = false; if(wasPlaying && progress < 1) play(); }
+    function endScrub(){ if(!scrubbing) return; scrubbing=false; if(wasPlaying && progress<1) play(); else if(!wasPlaying && progress<1) setPlay("&#9654; Resume"); }
     track.addEventListener("mousedown", startScrub);
     window.addEventListener("mousemove", moveScrub);
     window.addEventListener("mouseup", endScrub);
@@ -720,11 +720,25 @@
     window.addEventListener("touchmove", moveScrub, {passive:false});
     window.addEventListener("touchend", endScrub);
 
-    if(window.__RACE_DEBUG){ window.__raceReplay = { renderFrame:renderFrame, parts:parts, startT:startT, endT:endT, rowEls:rowEls, ROW_H:ROW_H }; }
+    if(window.__RACE_DEBUG){
+      window.__raceReplay = {
+        buildFromHistory: buildFromHistory,
+        renderFrame: function(p){ return renderFrame(p); },
+        getState: function(){ return { contenders:contenders, rowEls:rowEls, startT:startT, endT:endT, span:span, laneCount:laneCount }; }
+      };
+    }
   }
 
-  renderLive();
-  initReplay();
+  // ==================================================================
+  // boot
+  // ==================================================================
+  (async function(){
+    var live = null;
+    try{ var r = await fetch("data/live.json?_="+Date.now()); if(r.ok) live = await r.json(); }
+    catch(e){ /* not deployed yet / offline */ }
+    renderLive(live);
+    initReplay();
+  })();
 })();
 </script>
 </body>
